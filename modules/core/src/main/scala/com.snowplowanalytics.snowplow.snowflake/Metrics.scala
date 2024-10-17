@@ -21,6 +21,8 @@ trait Metrics[F[_]] {
   def addGood(count: Int): F[Unit]
   def addBad(count: Int): F[Unit]
   def setLatencyMillis(latencyMillis: Long): F[Unit]
+  def setLatencyCollectorToTargetMillis(latencyMillis: Long): F[Unit]
+  def setLatencyCollectorToTargetPessimisticMillis(latencyMillis: Long): F[Unit]
 
   def report: Stream[F, Nothing]
 }
@@ -33,18 +35,22 @@ object Metrics {
   private case class State(
     good: Int,
     bad: Int,
-    latencyMillis: Long
+    latencyMillis: Long,
+    latencyCollectorToTargetMillis: Long,
+    latencyCollectorToTargetPessimisticMillis: Long
   ) extends CommonMetrics.State {
     def toKVMetrics: List[CommonMetrics.KVMetric] =
       List(
         KVMetric.CountGood(good),
         KVMetric.CountBad(bad),
-        KVMetric.LatencyMillis(latencyMillis)
+        KVMetric.LatencyMillis(latencyMillis),
+        KVMetric.LatencyCollectorToTargetMillis(latencyCollectorToTargetMillis),
+        KVMetric.LatencyCollectorToTargetPessimisticMillis(latencyCollectorToTargetPessimisticMillis)
       )
   }
 
   private object State {
-    def empty: State = State(0, 0, 0L)
+    def empty: State = State(0, 0, 0L, 0L, 0L)
   }
 
   private def impl[F[_]: Async](config: Config.Metrics, ref: Ref[F, State]): Metrics[F] =
@@ -54,6 +60,10 @@ object Metrics {
       def addBad(count: Int): F[Unit] =
         ref.update(s => s.copy(bad = s.bad + count))
       def setLatencyMillis(latencyMillis: Long): F[Unit] =
+        ref.update(s => s.copy(latencyMillis = s.latencyMillis.max(latencyMillis)))
+      def setLatencyCollectorToTargetMillis(latencyMillis: Long): F[Unit] =
+        ref.update(s => s.copy(latencyMillis = s.latencyMillis.min(latencyMillis)))
+      def setLatencyCollectorToTargetPessimisticMillis(latencyMillis: Long): F[Unit] =
         ref.update(s => s.copy(latencyMillis = s.latencyMillis.max(latencyMillis)))
     }
 
@@ -77,5 +87,16 @@ object Metrics {
       val metricType = CommonMetrics.MetricType.Gauge
     }
 
+    final case class LatencyCollectorToTargetMillis(v: Long) extends CommonMetrics.KVMetric {
+      val key        = "latency_collector_to_target_millis"
+      val value      = v.toString
+      val metricType = CommonMetrics.MetricType.Gauge
+    }
+
+    final case class LatencyCollectorToTargetPessimisticMillis(v: Long) extends CommonMetrics.KVMetric {
+      val key        = "latency_collector_to_target_pessimistic_millis"
+      val value      = v.toString
+      val metricType = CommonMetrics.MetricType.Gauge
+    }
   }
 }
